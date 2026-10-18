@@ -1,0 +1,49 @@
+name: Publish prepared Instagram post
+on:
+  schedule:
+    # UTC 00/03/06/09/12 = Asia/Seoul 09/12/15/18/21.
+    - cron: '0 0,3,6,9,12 * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish one approved due post (false = validation only)'
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: instagram-publisher
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    # No execution until explicitly enabled after credentials are configured.
+    if: vars.PUBLISH_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unit tests (offline)
+        run: python -m unittest test_publisher -v
+      - name: Configure state commits
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Validate or publish
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_API_VERSION: ${{ vars.IG_API_VERSION || 'v25.0' }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PUBLISH_ENABLED: ${{ vars.PUBLISH_ENABLED }}
+          DO_PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+        run: |
+          if [ "$DO_PUBLISH" = 'true' ]; then
+            python publisher.py --publish
+          else
+            python publisher.py
+          fi
